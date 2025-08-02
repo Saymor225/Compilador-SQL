@@ -8,23 +8,63 @@ def p_query(p):
              | delete_query'''
     p[0] = p[1]
 
+# --- SELECT ---
+
 def p_select_query(p):
-    '''select_query : SELECT select_columns FROM IDENTIFIER where_clause_opt order_by_opt'''
+    '''select_query : SELECT DISTINCT select_list FROM IDENTIFIER join_clause_opt where_clause_opt group_by_clause_opt order_by_opt limit_clause_opt
+                    | SELECT select_list FROM IDENTIFIER join_clause_opt where_clause_opt group_by_clause_opt order_by_opt limit_clause_opt'''
+    if len(p) == 11: # com DISTINCT
+        p[0] = {
+            'type': 'select',
+            'distinct': True,
+            'columns': p[3],
+            'table': p[5],
+            'join': p[6],
+            'where': p[7],
+            'group_by': p[8],
+            'order_by': p[9],
+            'limit': p[10]
+        }
+    else: # sem DISTINCT
+        p[0] = {
+            'type': 'select',
+            'distinct': False,
+            'columns': p[2],
+            'table': p[4],
+            'join': p[5],
+            'where': p[6],
+            'group_by': p[7],
+            'order_by': p[8],
+            'limit': p[9]
+        }
+
+def p_select_list(p):
+    '''select_list : select_item
+                   | select_item COMMA select_list'''
+    if len(p) == 2:
+        p[0] = [p[1]]
+    else:
+        p[0] = [p[1]] + p[3]
+
+def p_select_item(p):
+    '''select_item : TIMES
+                   | IDENTIFIER
+                   | aggregate_function'''
+    p[0] = p[1]
+
+def p_aggregate_function(p):
+    '''aggregate_function : COUNT LPAREN TIMES RPAREN
+                          | COUNT LPAREN IDENTIFIER RPAREN
+                          | SUM LPAREN IDENTIFIER RPAREN
+                          | AVG LPAREN IDENTIFIER RPAREN'''
+    func_name = p[1].upper()
+    col_name = p[3]
     p[0] = {
-        'type': 'select',
-        'columns': p[2],
-        'table': p[4],
-        'where': p[5],
-        'order_by': p[6]
+        'aggregate': func_name,
+        'column': col_name
     }
 
-def p_select_columns(p):
-    '''select_columns : column_list
-                     | COUNT LPAREN TIMES RPAREN'''
-    if len(p) == 2:
-        p[0] = p[1]
-    else:
-        p[0] = ['COUNT(*)']
+# --- Regras INSERT, UPDATE, DELETE ---
 
 def p_insert_query(p):
     '''insert_query : INSERT INTO IDENTIFIER LPAREN column_list RPAREN VALUES LPAREN value_list RPAREN
@@ -61,13 +101,56 @@ def p_delete_query(p):
         'where': p[4]
     }
 
+# --- Cláusulas Opcionais (JOIN, WHERE, etc.) ---
+
+def p_join_clause_opt(p):
+    '''join_clause_opt : inner_join_clause
+                       | left_join_clause
+                       | empty'''
+    p[0] = p[1]
+
+def p_inner_join_clause(p):
+    '''inner_join_clause : JOIN IDENTIFIER ON join_condition'''
+    p[0] = {
+        'type': 'INNER',
+        'table': p[2],
+        'on': p[4]
+    }
+
+def p_left_join_clause(p):
+    '''left_join_clause : LEFT JOIN IDENTIFIER ON join_condition'''
+    p[0] = {'type': 'LEFT', 'table': p[3], 'on': p[5]}
+
+def p_join_condition(p):
+    '''join_condition : IDENTIFIER EQ IDENTIFIER'''
+    p[0] = {'left': p[1], 'right': p[3]}
+
+def p_where_clause_opt(p):
+    '''where_clause_opt : WHERE condition
+                        | empty'''
+    p[0] = p[2] if len(p) > 2 else None
+
+def p_group_by_clause_opt(p):
+    '''group_by_clause_opt : GROUP BY column_list
+                           | empty'''
+    p[0] = p[3] if len(p) > 2 else None
+
+def p_order_by_opt(p):
+    '''order_by_opt : ORDER BY order_list
+                    | empty'''
+    p[0] = p[3] if len(p) > 2 else None
+
+def p_limit_clause_opt(p):
+    '''limit_clause_opt : LIMIT NUMBER
+                        | empty'''
+    p[0] = p[2] if len(p) > 2 else None
+
+# --- Listas e Itens Auxiliares ---
+
 def p_set_list(p):
     '''set_list : set_item
                | set_item COMMA set_list'''
-    if len(p) == 2:
-        p[0] = p[1]
-    else:
-        p[0] = {**p[1], **p[3]}
+    p[0] = p[1] if len(p) == 2 else {**p[1], **p[3]}
 
 def p_set_item(p):
     '''set_item : IDENTIFIER EQ value'''
@@ -76,29 +159,12 @@ def p_set_item(p):
 def p_value_list(p):
     '''value_list : value
                  | value COMMA value_list'''
-    if len(p) == 2:
-        p[0] = [p[1]]
-    else:
-        p[0] = [p[1]] + p[3]
+    p[0] = [p[1]] if len(p) == 2 else [p[1]] + p[3]
 
 def p_column_list(p):
-    '''column_list : TIMES
-                  | IDENTIFIER
+    '''column_list : IDENTIFIER
                   | IDENTIFIER COMMA column_list'''
-    if len(p) == 2:
-        p[0] = ['*'] if p[1] == '*' else [p[1]]
-    else:
-        p[0] = [p[1]] + p[3]
-
-def p_where_clause_opt(p):
-    '''where_clause_opt : WHERE condition
-                        | empty'''
-    p[0] = p[2] if len(p) == 3 else None
-
-def p_order_by_opt(p):
-    '''order_by_opt : ORDER BY order_list
-                    | empty'''
-    p[0] = p[3] if len(p) == 4 else None
+    p[0] = [p[1]] if len(p) == 2 else [p[1]] + p[3]
 
 def p_order_list(p):
     '''order_list : order_item
@@ -107,52 +173,54 @@ def p_order_list(p):
 
 def p_order_item(p):
     '''order_item : IDENTIFIER asc_desc'''
-    p[0] = {
-        'column': p[1],
-        'direction': p[2]
-    }
+    p[0] = {'column': p[1], 'direction': p[2]}
 
 def p_asc_desc(p):
     '''asc_desc : ASC
                 | DESC
                 | empty'''
-    p[0] = p[1] if len(p) > 1 and p[1] is not None else 'ASC'
+    p[0] = p[1].upper() if len(p) > 1 and p[1] is not None else 'ASC'
+
+# --- Condições e Operadores ---
 
 def p_condition(p):
     '''condition : simple_condition
-                | LPAREN condition RPAREN
-                | condition AND condition
-                | condition OR condition
-                | NOT condition'''
-    if len(p) == 2:
-        p[0] = p[1]
-    elif p[1] == '(':
-        p[0] = p[2]
-    elif p[2] == 'AND':
-        p[0] = {
-            'operator': 'AND',
-            'left': p[1],
-            'right': p[3]
+                 | LPAREN condition RPAREN
+                 | condition AND condition
+                 | condition OR condition
+                 | NOT condition'''
+    if len(p) == 2: p[0] = p[1]
+    elif p[1] == '(': p[0] = p[2]
+    elif p[2].upper() == 'AND': p[0] = {
+        'operator': 'AND',
+        'left': p[1],
+        'right': p[3]
         }
-    elif p[2] == 'OR':
-        p[0] = {
-            'operator': 'OR',
-            'left': p[1],
-            'right': p[3]
+    elif p[2].upper() == 'OR': p[0] = {
+        'operator': 'OR',
+        'left': p[1],
+        'right': p[3]
         }
-    elif p[1] == 'NOT':
-        p[0] = {
-            'operator': 'NOT',
-            'condition': p[2]
+    elif p[1].upper() == 'NOT': p[0] = {
+        'operator': 'NOT',
+        'condition': p[2]
         }
 
 def p_simple_condition(p):
-    '''simple_condition : IDENTIFIER operator value'''
-    p[0] = {
-        'column': p[1],
-        'operator': p[2],
-        'value': p[3]
-    }
+    '''simple_condition : IDENTIFIER operator value
+                        | IDENTIFIER LIKE STRING_LITERAL'''
+    if len(p) == 4 and p[2].lower() == 'like':
+        p[0] = {
+            'column': p[1],
+            'operator': 'LIKE',
+            'value': p[3]
+        }
+    elif len(p) == 4:
+        p[0] = {
+            'column': p[1],
+            'operator': p[2],
+            'value': p[3]
+        }
 
 def p_operator(p):
     '''operator : EQ
@@ -168,6 +236,8 @@ def p_value(p):
              | STRING_LITERAL'''
     p[0] = p[1]
 
+# --- Regras Vazias e de Erro ---
+
 def p_empty(p):
     'empty :'
     pass
@@ -178,4 +248,5 @@ def p_error(p):
     else:
         print("Erro de sintaxe: fim inesperado da entrada")
 
+# Constrói o parser
 parser = yacc.yacc(debug=False)
